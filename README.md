@@ -40,13 +40,13 @@ We use **Conda** for environment management and **pip** for dependency installat
 **1. Create Conda Environment**
 
 ```bash
-conda create -n crossmodal_exp python=3.9 -y
+conda create -n cmr python=3.9 -y
 ```
 
 **2. Activate Environment**
 
 ```bash
-conda activate crossmodal_exp
+conda activate cmr
 ```
 
 **3. Install Dependencies**
