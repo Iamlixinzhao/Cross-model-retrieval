@@ -235,17 +235,6 @@ Ensure training set = 6513 samples, test set = 1000 samples.
 --batch_size 32 --n_samples 3
 ```
 
-## 📖 Citation
-
-```bibtex
-@inproceedings{pcme2025,
-  title={Probabilistic Cross-Modal Embeddings for Video-Text Retrieval},
-  author={Jiahao Zheng},
-  booktitle={Design Automation Conference (DAC)},
-  year={2025}
-}
-```
-
 ## 📚 Related Work
 
 - **ImageBind**: [Girdhar et al., CVPR 2023](https://arxiv.org/abs/2305.05665)
