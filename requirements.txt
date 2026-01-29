@@ -1,24 +1,21 @@
-# Core dependencies
+# Core Dependencies
 torch>=2.0.0
 torchvision>=0.15.0
-torchaudio>=2.0.0
-
-# Video processing
-decord>=0.6.0
-opencv-python>=4.7.0
-
-# Image processing
-Pillow>=9.5.0
-
-# Data processing
-pandas>=2.0.0
-numpy>=1.24.0
-
-# Progress bars
+numpy>=1.21.0
+scikit-learn>=1.0.0
 tqdm>=4.65.0
 
-# Transformations
-einops>=0.6.1
+# Data Processing
+pandas>=1.3.0
 
-# Optional: For ImageBind (install separately from source)
-# git+https://github.com/facebookresearch/ImageBind.git
+# Optional: Visualization
+matplotlib>=3.5.0
+seaborn>=0.11.0
+
+# Optional: Better progress bars
+rich>=10.0.0
+
+# Development
+pytest>=7.0.0
+black>=22.0.0
+flake8>=4.0.0

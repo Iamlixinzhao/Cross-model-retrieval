@@ -4,7 +4,7 @@
 """
 MSR-VTT 1k-A evaluation with ImageBind
 Outputs JSON:
-  /scratch365/jzheng7/ImageBind/msrvtt_results/msrvtt_1kA_metrics.json
+  /mnt/pes/ImageBind/msrvtt_results/msrvtt_1kA_metrics.json
 
 Prereqs (in conda env 'imagebind'):
   pip install torch torchvision torchaudio pandas decord tqdm pillow opencv-python einops
@@ -18,7 +18,7 @@ import sys
 import numpy as np
 
 # --- ensure local repo is importable even if not pip-installed ---
-sys.path.insert(0, str(Path("/scratch365/jzheng7/ImageBind")))
+sys.path.insert(0, str(Path("/mnt/pes/ImageBind")))
 
 import torch
 import torch.nn.functional as F
@@ -45,7 +45,7 @@ from imagebind import data as ib_data
 
 
 # ------------------------- Paths -------------------------
-ROOT    = Path("/scratch365/jzheng7/ImageBind")
+ROOT    = Path("/mnt/pes/ImageBind")
 VID_DIR = ROOT / "msrvtt_videos"
 AUD_DIR = ROOT / "msrvtt_audio"
 ANN_DIR = ROOT / "msrvtt_annotation"

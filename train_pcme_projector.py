@@ -128,13 +128,17 @@ def train(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # Load embeddings
-    print(f"Loading embeddings from {args.emb_dir}")
-    text = torch.load(Path(args.emb_dir) / 'emb_text.pt')
-    video = torch.load(Path(args.emb_dir) / 'emb_video.pt')
+    emb_dir = Path(args.emb_dir)
+    if not emb_dir.exists():
+        raise FileNotFoundError(f"Embeddings directory not found: {emb_dir}")
+    
+    print(f"Loading embeddings from {emb_dir}")
+    text = torch.load(emb_dir / 'emb_text.pt', weights_only=False)
+    video = torch.load(emb_dir / 'emb_video.pt', weights_only=False)
     N = text.shape[0]
     assert N >= 6000, f"Looks like TEST split (N={N}). Point --emb_dir to msrvtt_train_embeddings."
     try:
-        audio = torch.load(Path(args.emb_dir) / 'emb_audio.pt')
+        audio = torch.load(emb_dir / 'emb_audio.pt', weights_only=False)
         print(f"  Text: {text.shape}, Video: {video.shape}, Audio: {audio.shape}")
     except:
         audio = None
@@ -317,11 +321,13 @@ def train(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--emb_dir', type=str, required=True)
+    parser.add_argument('--emb_dir', type=str, 
+                        default='/mnt/pes/ImageBind/msrvtt_train_embeddings',
+                        help='Directory containing emb_text.pt and emb_video.pt')
     parser.add_argument('--save_dir', type=str, required=True)
-    parser.add_argument('--epochs', type=int, default=50)
+    parser.add_argument('--epochs', type=int, default=40)
     parser.add_argument('--batch_size', type=int, default=64)
-    parser.add_argument('--lr', type=float, default=1e-4)
+    parser.add_argument('--lr', type=float, default=1e-5)
     parser.add_argument('--temperature', type=float, default=0.07)
 
     # Loss configuration
@@ -335,12 +341,12 @@ if __name__ == '__main__':
     # Variance regularization
     parser.add_argument('--var_reg_type', type=str,
                         choices=['none', 'kl', 'lower_bound', 'penalty', 'upper_bound', 'target'],
-                        default='kl',
+                        default='upper_bound',
                         help='kl: KL to N(0,I), lower_bound: prevent collapse, '
                              'upper_bound: prevent too large variance, '
                              'target: pull to target sigma, '
                              'penalty: your original (not recommended), none: no reg')
-    parser.add_argument('--var_reg_weight', type=float, default=0.001,
+    parser.add_argument('--var_reg_weight', type=float, default=0.05,
                         help='Weight for variance regularization')
     parser.add_argument('--min_var', type=float, default=0.1,
                         help='Minimum variance threshold (for lower_bound)')

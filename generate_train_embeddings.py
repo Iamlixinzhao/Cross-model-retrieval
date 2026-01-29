@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 import json
 
-sys.path.insert(0, str(Path("/scratch365/jzheng7/ImageBind")))
+sys.path.insert(0, str(Path("/mnt/pes/ImageBind")))
 
 import torch
 import torch.nn.functional as F
@@ -39,7 +39,7 @@ def get_train_split():
     """
     import json
 
-    ann_dir = Path("/scratch365/jzheng7/ImageBind/msrvtt_annotation")
+    ann_dir = Path("/mnt/pes/ImageBind/msrvtt_annotation")
 
     print("\n" + "=" * 60)
     print("Determining train split")
@@ -133,7 +133,7 @@ def main():
     if len(video_ids) == 0:
         print("❌ ERROR: No training videos found!")
         print("   Check that annotation files exist in:")
-        print("   /scratch365/jzheng7/ImageBind/msrvtt_annotation/")
+        print("   /mnt/pes/ImageBind/msrvtt_annotation/")
         sys.exit(1)
 
     if len(captions) == 0:
@@ -150,7 +150,7 @@ def main():
             sys.exit(0)
 
     # Prepare paths
-    vid_dir = Path("/scratch365/jzheng7/ImageBind/msrvtt_videos")
+    vid_dir = Path("/mnt/pes/ImageBind/msrvtt_videos")
     video_paths = [vid_dir / f"{vid}.mp4" for vid in video_ids]
 
     # Check how many videos exist
@@ -172,7 +172,7 @@ def main():
     video_emb = F.normalize(video_emb, dim=-1)
 
     # Save
-    output_dir = Path("/scratch365/jzheng7/ImageBind/msrvtt_train_embeddings")
+    output_dir = Path("/mnt/pes/ImageBind/msrvtt_train_embeddings")
     output_dir.mkdir(exist_ok=True, parents=True)
 
     torch.save(text_emb, output_dir / "emb_text.pt")

@@ -1,0 +1,111 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# 模型权重文件 (大文件)
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+*.bin
+*.weights
+
+# NPZ 数据文件 (Teacher 数据)
+*.npz
+
+# 结果文件
+results/
+sweep_results/
+sweep_deg_optimized/
+sweep_epochs_*/
+sweep_hp_*/
+sweep_hyperparams_*/
+poly_final_*/
+poly_best_final/
+poly_ckpt_*/
+pcme_baseline/
+pcme_checkpoints/
+pcme_checkpoints_correct/
+
+# JSON 结果 (大量)
+results_*.json
+*_results.json
+
+# 日志文件
+*.log
+logs/
+wandb/
+
+# 数据集和 Embeddings (非常大)
+*_embeddings/
+msrvtt_*/
+ImageBind/
+data/
+datasets/
+
+# 临时文件
+*.tmp
+*.temp
+tmp/
+temp/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# 大的实验输出
+experiments/
+outputs/
+checkpoints/
+
+# CSV 太大的话也可以忽略（但通常可以保留）
+# *.csv
+
+# 图片文件（如果很多的话）
+# *.png
+# *.jpg
+# *.jpeg

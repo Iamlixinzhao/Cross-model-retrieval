@@ -73,7 +73,7 @@ def extract_zip(zip_path, extract_to, description=""):
 
 def main():
     # Configuration
-    BASE_DIR = Path("/scratch365/jzheng7/ImageBind")
+    BASE_DIR = Path("/mnt/pes/ImageBind")
     DOWNLOAD_DIR = BASE_DIR / "msrvtt_downloads"
     VIDEO_DIR = BASE_DIR / "msrvtt_videos"
     ANNOTATION_DIR = BASE_DIR / "msrvtt_annotation"

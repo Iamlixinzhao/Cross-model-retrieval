@@ -1,0 +1,439 @@
+# Core Mathematical Derivation: Polynomial Approximation for Monte Carlo Sampling
+
+## 🎯 Core Idea
+
+**Problem:** PCME uses Monte Carlo sampling to compute similarity, which is computationally expensive and cannot be deployed on CIM devices.
+
+**Solution:** Approximate MC sampling results with polynomial functions to achieve deterministic, CIM-friendly inference.
+
+---
+
+## 📐 Step 1: PCME Similarity Function
+
+### **Probabilistic Embeddings**
+
+Given text and video, PCME learns probability distributions for each modality instead of point estimates:
+
+- Text: $t \sim \mathcal{N}(\mu_t, \text{diag}(\sigma_t^2))$
+- Video: $v \sim \mathcal{N}(\mu_v, \text{diag}(\sigma_v^2))$
+
+where $\mu$ is the mean vector and $\sigma^2$ is the variance vector (diagonal covariance matrix).
+
+### **PCME Similarity (Equation 4)**
+
+$$
+\text{sim}(t, v) = -\log \mathbb{E}\left[ e^{-\|t - v\|^2} \right]
+$$
+
+**Intuitive Understanding:**
+- $\|t - v\|^2$ is the squared Euclidean distance
+- $\mathbb{E}$ is the expectation over the distributions of $t$ and $v$
+- $e^{-\|t - v\|^2}$ is the exponential kernel of distance
+- Taking negative log yields similarity (smaller = more similar)
+
+### **Monte Carlo Approximation**
+
+Since the expectation cannot be computed analytically, PCME uses MC sampling:
+
+$$
+\text{sim}(t, v) \approx -\log \left( \frac{1}{K} \sum_{i=1}^K e^{-\|t_i - v_i\|^2} \right)
+$$
+
+where $t_i \sim \mathcal{N}(\mu_t, \text{diag}(\sigma_t^2))$ and $v_i \sim \mathcal{N}(\mu_v, \text{diag}(\sigma_v^2))$
+
+
+## 📐 Step 2: Statistical Feature Extraction
+
+### **Key Observation**
+
+The squared distance $D = \|t - v\|^2$ is a random variable completely determined by its distribution.
+
+For Gaussian distributions, the first two moments of $D$ (mean and variance) contain most of the information.
+
+### **Expected Squared Distance (ed)**
+
+**Definition:**
+
+$$
+\text{ed} = \mathbb{E}[\|t - v\|^2]
+$$
+
+**Derivation:**
+
+$$
+\begin{aligned}
+\mathbb{E}[\|t - v\|^2] &= \mathbb{E}\left[\sum_{j=1}^d (t_j - v_j)^2\right] \\
+&= \sum_{j=1}^d \mathbb{E}[(t_j - v_j)^2]
+\end{aligned}
+$$
+
+For each dimension $j$:
+- $t_j \sim \mathcal{N}(\mu_{t,j}, \sigma_{t,j}^2)$
+- $v_j \sim \mathcal{N}(\mu_{v,j}, \sigma_{v,j}^2)$
+- $t_j - v_j \sim \mathcal{N}(\mu_{t,j} - \mu_{v,j}, \sigma_{t,j}^2 + \sigma_{v,j}^2)$
+
+Therefore:
+
+$$
+\mathbb{E}[(t_j - v_j)^2] = \text{Var}[t_j - v_j] + (\mathbb{E}[t_j - v_j])^2
+$$
+
+$$
+= (\sigma_{t,j}^2 + \sigma_{v,j}^2) + (\mu_{t,j} - \mu_{v,j})^2
+$$
+
+**Final Result:**
+
+$$
+\boxed{\text{ed} = \sum_{j=1}^d \left[(\mu_{t,j} - \mu_{v,j})^2 + \sigma_{t,j}^2 + \sigma_{v,j}^2\right]}
+$$
+
+**Vector Form:**
+
+$$
+\text{ed} = \|\mu_t - \mu_v\|^2 + \|\sigma_t\|^2 + \|\sigma_v\|^2
+$$
+
+**Physical Interpretation:**
+- $\|\mu_t - \mu_v\|^2$: Distance between means (deterministic part)
+- $\|\sigma_t\|^2 + \|\sigma_v\|^2$: Contribution from uncertainty (variance part)
+
+### **Variance (vd)**
+
+**Definition:**
+
+$$
+\text{vd} = \text{Var}[\|t - v\|^2]
+$$
+
+**Derivation:**
+
+$$
+\text{Var}[D] = \mathbb{E}[D^2] - (\mathbb{E}[D])^2
+$$
+
+For $(t_j - v_j)^2$, by the properties of the non-central $\chi^2$ distribution:
+
+$$
+\text{Var}[(t_j - v_j)^2] = 2(\sigma_{t,j}^2 + \sigma_{v,j}^2)^2 + 4(\mu_{t,j} - \mu_{v,j})^2(\sigma_{t,j}^2 + \sigma_{v,j}^2)
+$$
+
+**Final Result:**
+
+$$
+\boxed{\text{vd} = 2\sum_{j=1}^d \left[(\sigma_{t,j}^2 + \sigma_{v,j}^2)^2 + 2(\mu_{t,j} - \mu_{v,j})^2(\sigma_{t,j}^2 + \sigma_{v,j}^2)\right]}
+$$
+
+**Simplified Form:**
+
+$$
+\text{vd} = 2\|\sigma_t + \sigma_v\|^4 + 4 \sum_{j=1}^d (\mu_{t,j} - \mu_{v,j})^2 (\sigma_{t,j}^2 + \sigma_{v,j}^2)
+$$
+
+**Physical Interpretation:**
+- First term $2\|\sigma_t + \sigma_v\|^4$: Pure variance contribution
+- Second term $4\sum (\mu - \mu')^2 \sigma^2$: Interaction between mean and variance
+
+---
+
+## 📐 Step 3: Polynomial Approximation
+
+### **Hypothesis**
+
+PCME similarity can be expressed as a function of $\text{ed}$ and $\text{vd}$:
+
+$$
+\text{sim}(t, v) \approx f(\text{ed}, \text{vd})
+$$
+
+**Theoretical Justification:**
+
+1. **Moment Generating Function (MGF):**
+   $$
+   \mathbb{E}[e^{-D}] = M_D(-1)
+   $$
+   For Gaussian distributions, MGF can be expanded using the first few moments (Taylor series).
+
+2. **Weierstrass Approximation Theorem:**
+   Any continuous function can be approximated by polynomials with arbitrary precision.
+
+### **Polynomial Form**
+
+Assume $f$ can be approximated by a $p$-th degree bivariate polynomial:
+
+$$
+f(\text{ed}, \text{vd}) = \sum_{i=0}^{p} \sum_{j=0}^{p-i} c_{ij} \cdot \text{ed}^i \cdot \text{vd}^j + b
+$$
+
+**Feature Extraction (Polynomial Features):**
+
+For input $(\text{ed}, \text{vd})$, generate feature vector:
+
+$$
+\phi(\text{ed}, \text{vd}) = [1, \text{ed}, \text{vd}, \text{ed}^2, \text{ed} \cdot \text{vd}, \text{vd}^2, \ldots, \text{ed}^p, \ldots, \text{vd}^p]
+$$
+
+Number of features: $m = \frac{(p+1)(p+2)}{2}$
+
+**Example (Degree=3):**
+
+$$
+\phi = [1, \text{ed}, \text{vd}, \text{ed}^2, \text{ed}\text{vd}, \text{vd}^2, \text{ed}^3, \text{ed}^2\text{vd}, \text{ed}\text{vd}^2, \text{vd}^3]
+$$
+
+Total: 10 features.
+
+**Polynomial Prediction:**
+
+$$
+\boxed{f(\text{ed}, \text{vd}) = \phi(\text{ed}, \text{vd})^T \mathbf{c} + b}
+$$
+
+where $\mathbf{c} \in \mathbb{R}^m$ is the coefficient vector and $b \in \mathbb{R}$ is the bias.
+
+---
+
+## 📐 Step 4: Coefficient Fitting
+
+### **Training Data Generation (Build Teacher)**
+
+**Goal:** Create dataset $\mathcal{D} = \{(\text{ed}_n, \text{vd}_n, y_n)\}_{n=1}^N$
+
+**Steps:**
+
+1. **Sample Embedding Pairs**
+
+Randomly sample $N$ embedding pairs from a pre-trained PCME model:
+$$
+(\mu_t, \sigma_t, \mu_v, \sigma_v)_n, \quad n = 1, \ldots, N
+$$
+
+Sampling strategy:
+- 90% positive samples (matched text-video pairs)
+- 10% negative samples (random pairings)
+
+2. **Compute Statistics**
+
+For each embedding pair, compute:
+$$
+\text{ed}_n = \|\mu_t - \mu_v\|^2 + \|\sigma_t\|^2 + \|\sigma_v\|^2
+$$
+$$
+\text{vd}_n = 2\|\sigma_t + \sigma_v\|^4 + 4\sum_j (\mu_{t,j} - \mu_{v,j})^2(\sigma_{t,j}^2 + \sigma_{v,j}^2)
+$$
+
+3. **Monte Carlo Label Computation**
+
+For each embedding pair, compute the true similarity using MC sampling:
+$$
+y_n = -\log \left( \frac{1}{K} \sum_{k=1}^K e^{-D_k} \right)
+$$
+
+where:
+- $D_k = \|t_k - v_k\|^2$
+- $t_k \sim \mathcal{N}(\mu_t, \text{diag}(\sigma_t^2))$
+- $v_k \sim \mathcal{N}(\mu_v, \text{diag}(\sigma_v^2))$
+- $K = 10$ (number of samples)
+
+**Hyperparameters:**
+- $N = 300{,}000$ (number of training samples)
+- $K = 10$ (MC sampling count)
+- $a = 0.1$ (negative sample ratio)
+
+### **Ridge Regression Fitting**
+
+**Feature Matrix:**
+
+$$
+\mathbf{X} \in \mathbb{R}^{N \times m}, \quad \mathbf{X}[n, :] = \phi(\text{ed}_n, \text{vd}_n)^T
+$$
+
+**Target Vector:**
+
+$$
+\mathbf{y} \in \mathbb{R}^N, \quad \mathbf{y}[n] = y_n
+$$
+
+**Optimization Problem:**
+
+$$
+\min_{\mathbf{c}, b} \left\{ \|\mathbf{y} - \mathbf{X}\mathbf{c} - b\mathbf{1}\|^2 + \alpha \|\mathbf{c}\|^2 \right\}
+$$
+
+where $\alpha$ is the regularization parameter ($\alpha = 10^{-3}$).
+
+**Analytical Solution:**
+
+1. **Centering:**
+   $$
+   \bar{y} = \frac{1}{N}\sum_{n=1}^N y_n, \quad \bar{\mathbf{X}} = \frac{1}{N}\sum_{n=1}^N \mathbf{X}[n, :]
+   $$
+   $$
+   \tilde{\mathbf{y}} = \mathbf{y} - \bar{y}\mathbf{1}, \quad \tilde{\mathbf{X}} = \mathbf{X} - \bar{\mathbf{X}}\mathbf{1}^T
+   $$
+
+2. **Solve for Coefficients:**
+   $$
+   \boxed{\mathbf{c} = (\tilde{\mathbf{X}}^T\tilde{\mathbf{X}} + \alpha \mathbf{I})^{-1} \tilde{\mathbf{X}}^T \tilde{\mathbf{y}}}
+   $$
+
+3. **Solve for Bias:**
+   $$
+   \boxed{b = \bar{y} - \bar{\mathbf{X}}^T \mathbf{c}}
+   $$
+
+**Implementation:**
+
+```python
+from sklearn.preprocessing import PolynomialFeatures
+from sklearn.linear_model import Ridge
+
+# Generate features
+poly = PolynomialFeatures(degree=p, include_bias=False)
+X = poly.fit_transform(np.column_stack([ed, vd]))
+
+# Ridge regression
+ridge = Ridge(alpha=1e-3, fit_intercept=True)
+ridge.fit(X, y)
+
+# Extract coefficients
+c = ridge.coef_
+b = ridge.intercept_
+```
+
+---
+
+## 📐 Step 5: Training Projectors
+
+### **Architecture**
+
+**Probabilistic Projector:**
+
+```
+x (ImageBind embedding, 1024-d)
+  ↓
+Linear(1024 → 2048) + BatchNorm + ReLU
+  ↓
+Linear(2048 → 2048) + BatchNorm + ReLU
+  ↓
+Branches:
+  ├─ μ: Linear(2048 → 1024)
+  └─ logvar: Linear(2048 → 1024)
+  
+Output: (μ, logvar)
+Transform: σ = exp(0.5 * logvar)
+```
+
+### **Loss Function**
+
+**InfoNCE with Polynomial Surrogate:**
+
+For batch $\{(t_i, v_i)\}_{i=1}^B$:
+
+1. **Forward Pass:**
+   $$
+   (\mu_{t,i}, \text{logvar}_{t,i}) = \text{TextProj}(t_i)
+   $$
+   $$
+   (\mu_{v,i}, \text{logvar}_{v,i}) = \text{VideoProj}(v_i)
+   $$
+
+2. **Compute Similarity Matrix $\mathbf{S} \in \mathbb{R}^{B \times B}$:**
+   $$
+   S_{ij} = \text{poly}(\text{ed}_{ij}, \text{vd}_{ij})
+   $$
+   
+   where:
+   $$
+   \text{ed}_{ij} = \|\mu_{t,i} - \mu_{v,j}\|^2 + \|\sigma_{t,i}\|^2 + \|\sigma_{v,j}\|^2
+   $$
+   $$
+   \text{vd}_{ij} = 2\|\sigma_{t,i} + \sigma_{v,j}\|^4 + 4\sum_k (\mu_{t,i,k} - \mu_{v,j,k})^2(\sigma_{t,i,k}^2 + \sigma_{v,j,k}^2)
+   $$
+
+3. **InfoNCE Loss (Symmetric Form):**
+   $$
+   \mathcal{L}_{\text{InfoNCE}} = -\frac{1}{B} \sum_{i=1}^B \left[\log \frac{e^{S_{ii}/\tau}}{\sum_{j=1}^B e^{S_{ij}/\tau}} + \log \frac{e^{S_{ii}/\tau}}{\sum_{j=1}^B e^{S_{ji}/\tau}}\right]
+   $$
+   
+   where $\tau = 0.07$ is the temperature parameter.
+
+**Variance Regularization:**
+
+$$
+\mathcal{L}_{\text{var}} = \frac{\lambda_{\text{var}}}{2Bd} \sum_{i=1}^B \left[\|\mu_{t,i}\|^2 + \|\sigma_{t,i}^2\|_1 - \sum_j \log \sigma_{t,i,j}^2 + \|\mu_{v,i}\|^2 + \|\sigma_{v,i}^2\|_1 - \sum_j \log \sigma_{v,i,j}^2 - 2d\right]
+$$
+
+where $\lambda_{\text{var}} = 0.001$.
+
+**Total Loss:**
+
+$$
+\boxed{\mathcal{L} = \mathcal{L}_{\text{InfoNCE}} + \mathcal{L}_{\text{var}}}
+$$
+
+### **Training Hyperparameters (Optimized)**
+
+```
+Optimizer: AdamW
+Learning Rate: 5e-6  ⭐ (Critical!)
+Epochs: 10  ⭐ (Avoid overfitting)
+Batch Size: 64
+Weight Decay: 1e-4
+Variance Regularization: λ_var = 0.001
+Temperature: τ = 0.07
+```
+
+---
+
+## 🎯 Complete Workflow Summary
+
+### **Training Phase (Three-Step Process)**
+
+```
+Step 1: Build Teacher
+  Input: Pre-trained PCME model
+  Process: Generate (ed, vd, y_MC) dataset via sampling
+  Output: teacher.npz (300k samples)
+
+Step 2: Fit Polynomial
+  Input: teacher.npz
+  Process: Ridge regression to fit poly(ed, vd) ≈ y_MC
+  Output: poly_coeffs.pt (coefficients c and bias b)
+
+Step 3: Train Projectors
+  Input: ImageBind embeddings, poly_coeffs.pt
+  Process: Train projectors to minimize InfoNCE loss
+  Output: best_projectors.pth (text_proj, video_proj)
+```
+
+### **Inference Phase (CIM Deployment)**
+
+```
+Input: text, video (raw data)
+  ↓
+ImageBind: Extract embeddings (frozen)
+  ↓
+Projectors: (μ_t, σ_t), (μ_v, σ_v)
+  ↓
+Statistics: ed = ||μ_t - μ_v||² + ||σ_t||² + ||σ_v||²
+            vd = 2||σ_t + σ_v||⁴ + 4⟨(μ_t - μ_v)², σ²⟩
+  ↓
+Polynomial: similarity = poly(ed, vd)
+  ↓
+Output: Similarity score
+```
+
+---
+
+## 📊 Theoretical Guarantees
+
+### **Why Does Polynomial Approximation Work?**
+
+1. **Weierstrass Approximation Theorem:**
+   Any continuous function defined on a compact set can be approximated by polynomials with arbitrary precision.
+
+2. **Taylor Expansion:**
+   $\mathbb{E}[e^{-D}]$ has a Taylor expansion in terms of $\text{ed}$ and $\text{vd}$ in polynomial form.
+
+
