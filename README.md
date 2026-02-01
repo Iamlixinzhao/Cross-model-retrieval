@@ -50,8 +50,8 @@ Cross-modal-retrieval/
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_USERNAME/YOUR_REPO.git
-cd YOUR_REPO
+git clone https://github.com/Iamlixinzhao/Cross-model-retrieval.git
+cd Cross-model-retrieval
 
 # Create virtual environment
 python -m venv venv
