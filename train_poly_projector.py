@@ -162,7 +162,7 @@ class PolySurrogate:
 
 class LearnablePolySurrogate(nn.Module):
     """
-    可学习的多项式：系数和偏置都是 nn.Parameter，可以和 projector 一起端到端训练。
+    Learnable polynomial: both coefficients and bias are nn.Parameter, can be trained end-to-end with projector.
     """
     def __init__(self, degree: int, fit_logit: bool = True, init_from: str = None):
         super().__init__()
@@ -170,9 +170,9 @@ class LearnablePolySurrogate(nn.Module):
         self.fit_logit = fit_logit
         n_feat = poly_num_features_2vars(degree)
         
-        # 初始化策略
+        # Initialization strategy
         if init_from:
-            # 从已有的 poly_coeffs.pt 初始化
+            # Initialize from existing poly_coeffs.pt
             ckpt = torch.load(init_from, map_location='cpu', weights_only=False)
             if int(ckpt['degree']) != degree:
                 raise ValueError(f"Degree mismatch: init poly has degree {ckpt['degree']}, but requested {degree}")
@@ -180,26 +180,26 @@ class LearnablePolySurrogate(nn.Module):
             self.bias = nn.Parameter(torch.tensor([float(ckpt['bias'])]))
             print(f"  [init] Initialized poly from {init_from}")
         else:
-            # 启发式初始化：基于 Eq.(4) 的形式 sigmoid(-a*ed + b)
-            # 期望 poly ≈ -a*ed + small_noise，这样初始就有合理的排序
+            # Heuristic initialization: based on Eq.(4) form sigmoid(-a*ed + b)
+            # Expect poly ≈ -a*ed + small_noise for reasonable initial ranking
             coeff_init = torch.randn(n_feat) * 0.1
-            # 第一个系数是 ed，给它一个负的初始值（因为距离越大，相似度越低）
-            coeff_init[0] = -5.0 + torch.randn(1) * 0.5  # ed 系数
-            # 第二个系数是 vd（方差），给小的正值
+            # First coefficient is ed, give it negative initial value (larger distance = lower similarity)
+            coeff_init[0] = -5.0 + torch.randn(1) * 0.5  # ed coefficient
+            # Second coefficient is vd (variance), give small positive value
             if n_feat > 1:
-                coeff_init[1] = -1.0 + torch.randn(1) * 0.3   # vd 系数
+                coeff_init[1] = -1.0 + torch.randn(1) * 0.3   # vd coefficient
             self.coeff = nn.Parameter(coeff_init)
             self.bias = nn.Parameter(torch.randn(1) * 0.5)
             print(f"  [init] Heuristic initialization: coeff[0]={self.coeff[0].item():.3f} (ed), coeff[1]={self.coeff[1].item() if n_feat>1 else 'N/A':.3f} (vd), bias={self.bias.item():.3f}")
     
     def forward(self, ed, vd):
-        """返回 logits ≈ logit(p(m|x,y))"""
+        """Return logits ≈ logit(p(m|x,y))"""
         X = poly_features_2vars_sklearn_order(ed, vd, self.degree)  # [..., n_feat]
         logits = (X * self.coeff).sum(dim=-1) + self.bias
         return logits
     
     def to_surrogate(self) -> PolySurrogate:
-        """转换为 dataclass 格式，用于保存和推理"""
+        """Convert to dataclass format for saving and inference"""
         return PolySurrogate(
             degree=self.degree,
             coeff=self.coeff.detach().cpu(),
@@ -241,7 +241,7 @@ def poly_features_2vars_sklearn_order(ed, vd, degree: int):
 def poly_predict_logits(ed, vd, poly):
     """
     Return logits ≈ logit(p(m|x,y)) for Eq.(4)
-    支持 PolySurrogate (dataclass) 和 LearnablePolySurrogate (nn.Module)
+    Supports PolySurrogate (dataclass) and LearnablePolySurrogate (nn.Module)
     """
     if isinstance(poly, LearnablePolySurrogate):
         return poly(ed, vd)
@@ -263,26 +263,26 @@ def pcme_loss_eq4_poly(t_mu, t_lv, v_mu, v_lv, poly, temperature=0.07, n_samples
     Then use it as similarity logits for bidirectional InfoNCE.
     
     Args:
-        n_samples: 如果 > 0，用 Monte Carlo 采样（类似 baseline PCME）；
-                   如果 = 0，用确定性的 (ed, vd)（原来的方式）
+        n_samples: If > 0, use Monte Carlo sampling (like baseline PCME);
+                   If = 0, use deterministic (ed, vd) (original way)
     """
     B = t_mu.size(0)
     device = t_mu.device
     
     if n_samples > 0:
-        # 🔥 NEW: Monte Carlo 采样，像 baseline 一样
+        # 🔥 NEW: Monte Carlo sampling, like baseline
         t_std = torch.exp(0.5 * t_lv)
         v_std = torch.exp(0.5 * v_lv)
         
         total_loss = 0.0
         for _ in range(n_samples):
-            # 采样
+            # Sampling
             eps_t = torch.randn_like(t_mu)
             eps_v = torch.randn_like(v_mu)
             z_t = t_mu + eps_t * t_std
             z_v = v_mu + eps_v * v_std
             
-            # 计算 (ed, vd) from samples
+            # Compute (ed, vd) from samples
             z_t_e = z_t.unsqueeze(1)  # [B,1,D]
             z_v_e = z_v.unsqueeze(0)  # [1,B,D]
             delta = z_t_e - z_v_e     # [B,B,D]
@@ -301,7 +301,7 @@ def pcme_loss_eq4_poly(t_mu, t_lv, v_mu, v_lv, poly, temperature=0.07, n_samples
         return total_loss / n_samples
     
     else:
-        # 原来的确定性方式
+        # Original deterministic way
         ed, vd = dist_stats_l2sq_matrix(t_mu, t_lv, v_mu, v_lv)  # [B,B]
         logits = poly_predict_logits(ed, vd, poly)               # [B,B]
 
@@ -312,10 +312,10 @@ def pcme_loss_eq4_poly(t_mu, t_lv, v_mu, v_lv, poly, temperature=0.07, n_samples
 
 def mu_contrastive_loss(t_mu, v_mu, temperature=0.07):
     """
-    [训练专用，不参与 CIM 推理]
-    Standard contrastive (InfoNCE) on mu. 仅用于训练时约束 projectors，
-    使匹配对的 cos(mu_t, mu_v) 更高。CIM 推理仍只做 projectors→(ed,vd)→poly→相似度，
-    不做任何 mu 相似度或对比计算。
+    [Training only, not used in CIM inference]
+    Standard contrastive (InfoNCE) on mu. Only used during training to constrain projectors,
+    makes matching pairs have higher cos(mu_t, mu_v). CIM inference still only does projectors→(ed,vd)→poly→similarity,
+    does not do any mu similarity or contrastive computation.
     t_mu, v_mu: [B,D], L2-normalized.
     """
     B = t_mu.size(0)
@@ -492,7 +492,7 @@ def mode_train_poly(args):
     print("\nTraining (Eq4 poly, NO MC sampling)")
     print(f"  poly_degree: {poly.degree}")
     print(f"  temperature: {args.temperature}")
-    print(f"  mu_loss_weight: {mu_weight} (训练专用，CIM 推理不用 mu)")
+    print(f"  mu_loss_weight: {mu_weight} (training only, CIM inference does not use mu)")
     print(f"  var_reg: {args.var_reg_type} (w={args.var_reg_weight})")
     print(f"  epochs={args.epochs}, batch={args.batch_size}, lr={args.lr}\n")
 
@@ -515,7 +515,7 @@ def mode_train_poly(args):
                                      temperature=args.temperature,
                                      n_samples=n_samples)
 
-            # [仅训练] mu 对比损失：只影响梯度，不改变 CIM 推理公式。CIM 仍只算 (ed,vd)→poly。
+            # [Training only] mu contrastive loss: only affects gradients, does not change CIM inference formula. CIM still only computes (ed,vd)→poly.
             mu_weight = getattr(args, "mu_loss_weight", 0.0)
             if mu_weight > 0:
                 loss_mu = mu_contrastive_loss(t_mu, v_mu, temperature=args.temperature)
@@ -562,8 +562,8 @@ def mode_train_poly(args):
                 "config": vars(args),
                 "poly": {
                     "degree": poly.degree,
-                    "coeff": poly.coeff,  # ← 保存完整系数
-                    "bias": poly.bias,    # ← 保存 bias
+                    "coeff": poly.coeff,  # ← Save full coefficients
+                    "bias": poly.bias,    # ← Save bias
                     "fit_logit": poly.fit_logit,
                     "coeff_n": int(poly.coeff.numel()),
                 }
@@ -574,18 +574,18 @@ def mode_train_poly(args):
 
 
 # -----------------------------
-# Mode 4: train_poly_e2e (端到端训练 poly 系数和 projector)
+# Mode 4: train_poly_e2e (end-to-end training of poly coefficients and projector)
 # -----------------------------
 def mode_train_poly_e2e(args):
     """
-    端到端训练：poly 系数和 projector 一起学习，不需要提前 build_teacher 和 fit_poly。
+    End-to-end training: poly coefficients and projector learn together, no need for build_teacher and fit_poly beforehand.
     
-    训练流程：
-    1. 随机初始化 poly 系数
-    2. 每个 batch：projectors → (μ, logvar) → (ed, vd) → poly(ed, vd) → 对比损失
-    3. 同时更新 projector 和 poly 系数
+    Training workflow:
+    1. Randomly initialize poly coefficients
+    2. Each batch: projectors → (μ, logvar) → (ed, vd) → poly(ed, vd) → contrastive loss
+    3. Update both projector and poly coefficients simultaneously
     
-    CIM 推理不变：projectors → (ed, vd) → poly(ed, vd) → similarity
+    CIM inference unchanged: projectors → (ed, vd) → poly(ed, vd) → similarity
     """
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -599,12 +599,12 @@ def mode_train_poly_e2e(args):
     text_proj = ProbabilisticProjector(dim, hidden=args.hidden).to(device)
     video_proj = ProbabilisticProjector(dim, hidden=args.hidden).to(device)
     
-    # 创建可学习的 poly（可以从已有 poly 初始化，或启发式初始化）
+    # Create learnable poly (can initialize from existing poly, or use heuristic initialization)
     init_from = getattr(args, 'init_poly', None)
     poly = LearnablePolySurrogate(degree=args.poly_degree, fit_logit=True, init_from=init_from).to(device)
     print(f"Initialized learnable poly: degree={poly.degree}, n_params={sum(p.numel() for p in poly.parameters())}")
 
-    # optimizer 包含 projector + poly 的所有参数
+    # optimizer includes all parameters of projector + poly
     params = list(text_proj.parameters()) + list(video_proj.parameters()) + list(poly.parameters())
     optimizer = torch.optim.AdamW(params, lr=args.lr, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=args.lr * 0.1)
@@ -618,12 +618,12 @@ def mode_train_poly_e2e(args):
     mu_weight = getattr(args, "mu_loss_weight", 0.0)
     n_samples = getattr(args, 'n_samples', 0)
     init_from = getattr(args, 'init_poly', None)
-    print("\n端到端训练 (poly 系数可学习，NO teacher/fit_poly)")
+    print("\nEnd-to-end training (poly coefficients learnable, NO teacher/fit_poly)")
     print(f"  poly_degree: {poly.degree}")
-    print(f"  init_poly: {init_from if init_from else '启发式初始化'}")
-    print(f"  n_samples: {n_samples} ({'Monte Carlo 采样' if n_samples > 0 else '确定性训练'})")
+    print(f"  init_poly: {init_from if init_from else 'heuristic initialization'}")
+    print(f"  n_samples: {n_samples} ({'Monte Carlo sampling' if n_samples > 0 else 'deterministic training'})")
     print(f"  temperature: {args.temperature}")
-    print(f"  mu_loss_weight: {mu_weight} (训练专用，CIM 推理不用 mu)")
+    print(f"  mu_loss_weight: {mu_weight} (training only, CIM inference does not use mu)")
     print(f"  var_reg: {args.var_reg_type} (w={args.var_reg_weight})")
     print(f"  epochs={args.epochs}, batch={args.batch_size}, lr={args.lr}\n")
 
@@ -640,10 +640,10 @@ def mode_train_poly_e2e(args):
             t_mu, t_lv = text_proj(tb)
             v_mu, v_lv = video_proj(vb)
 
-            # poly loss（poly 系数也参与梯度）
+            # poly loss (poly coefficients also participate in gradients)
             cont = pcme_loss_eq4_poly(t_mu, t_lv, v_mu, v_lv, poly, temperature=args.temperature)
 
-            # [仅训练] mu 对比损失
+            # [Training only] mu contrastive loss
             if mu_weight > 0:
                 loss_mu = mu_contrastive_loss(t_mu, v_mu, temperature=args.temperature)
                 cont = cont + mu_weight * loss_mu
@@ -682,7 +682,7 @@ def mode_train_poly_e2e(args):
         # save best
         if avg < best_loss:
             best_loss = avg
-            # 保存时把 learnable poly 转成 dataclass
+            # Convert learnable poly to dataclass when saving
             poly_surrogate = poly.to_surrogate()
             torch.save({
                 "text_proj": text_proj.state_dict(),
@@ -698,9 +698,9 @@ def mode_train_poly_e2e(args):
             print("  ✓ saved best")
 
     print("Done. best_loss =", best_loss)
-    print(f"\n保存的 ckpt 可用于 measure 脚本：")
+    print(f"\nSaved ckpt can be used in measure script:")
     print(f"  --ckpt {args.save_dir}/best_projectors_eq4_poly.pth")
-    print(f"  (poly 系数已包含在 ckpt 中，measure 时需从 ckpt 提取)")
+    print(f"  (poly coefficients are included in ckpt, need to extract from ckpt during measure)")
 
 
 # -----------------------------
@@ -748,21 +748,21 @@ def build_argparser():
     s2.add_argument("--max_var", type=float, default=0.09)
     s2.add_argument("--variance_check_every", type=int, default=5, help="0 disables variance check")
     s2.add_argument("--mu_loss_weight", type=float, default=0.0,
-                    help="[仅训练] mu 对比损失权重。CIM 推理仍只算 (ed,vd)→poly，不涉及 mu 相似度。设 0.5 可提升检索。")
+                    help="[Training only] mu contrastive loss weight. CIM inference still only computes (ed,vd)→poly, no mu similarity involved. Set 0.5 to improve retrieval.")
 
-    # train_poly_e2e (端到端训练，poly 系数可学习)
-    s3 = sub.add_parser("train_poly_e2e", help="端到端训练 poly 系数和 projector（不需要 teacher/fit_poly）")
+    # train_poly_e2e (end-to-end training, poly coefficients learnable)
+    s3 = sub.add_parser("train_poly_e2e", help="End-to-end training of poly coefficients and projector (no need for teacher/fit_poly)")
     s3.add_argument("--emb_dir", type=str, default="/mnt/pes/ImageBind/msrvtt_train_embeddings",
                     help="dir containing emb_text.pt and emb_video.pt")
     s3.add_argument("--save_dir", type=str, required=True)
     s3.add_argument("--poly_degree", type=int, default=5, help="poly degree (<=6)")
     s3.add_argument("--init_poly", type=str, default=None,
-                    help="可选：从已有的 poly_coeffs.pt 初始化（推荐！可提升效果）。不设置则用启发式初始化。")
+                    help="Optional: initialize from existing poly_coeffs.pt (recommended! improves performance). Use heuristic initialization if not set.")
     s3.add_argument("--n_samples", type=int, default=5,
-                    help="Monte Carlo 采样次数（推荐 5，像 baseline PCME 一样）。设 0 则用确定性训练（不推荐）。")
+                    help="Monte Carlo sampling count (recommend 5, like baseline PCME). Set 0 for deterministic training (not recommended).")
     s3.add_argument("--epochs", type=int, default=40)
     s3.add_argument("--batch_size", type=int, default=64)
-    s3.add_argument("--lr", type=float, default=1e-4, help="学习率（比 train_poly 高一点，因为要学 poly 系数）")
+    s3.add_argument("--lr", type=float, default=1e-4, help="Learning rate (slightly higher than train_poly because need to learn poly coefficients)")
     s3.add_argument("--hidden", type=int, default=2048)
     s3.add_argument("--temperature", type=float, default=0.07)
 
@@ -771,7 +771,7 @@ def build_argparser():
     s3.add_argument("--max_var", type=float, default=0.09)
     s3.add_argument("--variance_check_every", type=int, default=5, help="0 disables variance check")
     s3.add_argument("--mu_loss_weight", type=float, default=0.0,
-                    help="[仅训练] mu 对比损失权重。CIM 推理仍只算 (ed,vd)→poly。")
+                    help="[Training only] mu contrastive loss weight. CIM inference still only computes (ed,vd)→poly.")
 
     return ap
 
