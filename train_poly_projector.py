@@ -160,53 +160,6 @@ class PolySurrogate:
     bias: float          # scalar
     fit_logit: bool = True  # we fit logit(p)
 
-class LearnablePolySurrogate(nn.Module):
-    """
-    Learnable polynomial: both coefficients and bias are nn.Parameter, can be trained end-to-end with projector.
-    """
-    def __init__(self, degree: int, fit_logit: bool = True, init_from: str = None):
-        super().__init__()
-        self.degree = degree
-        self.fit_logit = fit_logit
-        n_feat = poly_num_features_2vars(degree)
-        
-        # Initialization strategy
-        if init_from:
-            # Initialize from existing poly_coeffs.pt
-            ckpt = torch.load(init_from, map_location='cpu', weights_only=False)
-            if int(ckpt['degree']) != degree:
-                raise ValueError(f"Degree mismatch: init poly has degree {ckpt['degree']}, but requested {degree}")
-            self.coeff = nn.Parameter(ckpt['coeff'].float().clone())
-            self.bias = nn.Parameter(torch.tensor([float(ckpt['bias'])]))
-            print(f"  [init] Initialized poly from {init_from}")
-        else:
-            # Heuristic initialization: based on Eq.(4) form sigmoid(-a*ed + b)
-            # Expect poly ≈ -a*ed + small_noise for reasonable initial ranking
-            coeff_init = torch.randn(n_feat) * 0.1
-            # First coefficient is ed, give it negative initial value (larger distance = lower similarity)
-            coeff_init[0] = -5.0 + torch.randn(1) * 0.5  # ed coefficient
-            # Second coefficient is vd (variance), give small positive value
-            if n_feat > 1:
-                coeff_init[1] = -1.0 + torch.randn(1) * 0.3   # vd coefficient
-            self.coeff = nn.Parameter(coeff_init)
-            self.bias = nn.Parameter(torch.randn(1) * 0.5)
-            print(f"  [init] Heuristic initialization: coeff[0]={self.coeff[0].item():.3f} (ed), coeff[1]={self.coeff[1].item() if n_feat>1 else 'N/A':.3f} (vd), bias={self.bias.item():.3f}")
-    
-    def forward(self, ed, vd):
-        """Return logits ≈ logit(p(m|x,y))"""
-        X = poly_features_2vars_sklearn_order(ed, vd, self.degree)  # [..., n_feat]
-        logits = (X * self.coeff).sum(dim=-1) + self.bias
-        return logits
-    
-    def to_surrogate(self) -> PolySurrogate:
-        """Convert to dataclass format for saving and inference"""
-        return PolySurrogate(
-            degree=self.degree,
-            coeff=self.coeff.detach().cpu(),
-            bias=float(self.bias.item()),
-            fit_logit=self.fit_logit
-        )
-
 def poly_num_features_2vars(degree: int) -> int:
     # sklearn PolynomialFeatures(include_bias=False) for 2 vars
     # number of monomials of total degree 1..degree in 2 vars = C(deg+2,2)-1
@@ -241,16 +194,13 @@ def poly_features_2vars_sklearn_order(ed, vd, degree: int):
 def poly_predict_logits(ed, vd, poly):
     """
     Return logits ≈ logit(p(m|x,y)) for Eq.(4)
-    Supports PolySurrogate (dataclass) and LearnablePolySurrogate (nn.Module)
+    Supports PolySurrogate (dataclass)
     """
-    if isinstance(poly, LearnablePolySurrogate):
-        return poly(ed, vd)
-    else:
-        # PolySurrogate dataclass
-        X = poly_features_2vars_sklearn_order(ed, vd, poly.degree)  # [..., n_feat]
-        coeff = poly.coeff.to(X.device, dtype=X.dtype)
-        logits = (X * coeff).sum(dim=-1) + float(poly.bias)
-        return logits
+    # PolySurrogate dataclass
+    X = poly_features_2vars_sklearn_order(ed, vd, poly.degree)  # [..., n_feat]
+    coeff = poly.coeff.to(X.device, dtype=X.dtype)
+    logits = (X * coeff).sum(dim=-1) + float(poly.bias)
+    return logits
 
 
 # -----------------------------
@@ -574,136 +524,6 @@ def mode_train_poly(args):
 
 
 # -----------------------------
-# Mode 4: train_poly_e2e (end-to-end training of poly coefficients and projector)
-# -----------------------------
-def mode_train_poly_e2e(args):
-    """
-    End-to-end training: poly coefficients and projector learn together, no need for build_teacher and fit_poly beforehand.
-    
-    Training workflow:
-    1. Randomly initialize poly coefficients
-    2. Each batch: projectors → (μ, logvar) → (ed, vd) → poly(ed, vd) → contrastive loss
-    3. Update both projector and poly coefficients simultaneously
-    
-    CIM inference unchanged: projectors → (ed, vd) → poly(ed, vd) → similarity
-    """
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-    emb_dir = Path(args.emb_dir)
-    text = torch.load(emb_dir / 'emb_text.pt', weights_only=False)
-    video = torch.load(emb_dir / 'emb_video.pt', weights_only=False)
-    N = text.shape[0]
-    print(f"Loaded embeddings: text={tuple(text.shape)}, video={tuple(video.shape)}")
-
-    dim = text.size(-1)
-    text_proj = ProbabilisticProjector(dim, hidden=args.hidden).to(device)
-    video_proj = ProbabilisticProjector(dim, hidden=args.hidden).to(device)
-    
-    # Create learnable poly (can initialize from existing poly, or use heuristic initialization)
-    init_from = getattr(args, 'init_poly', None)
-    poly = LearnablePolySurrogate(degree=args.poly_degree, fit_logit=True, init_from=init_from).to(device)
-    print(f"Initialized learnable poly: degree={poly.degree}, n_params={sum(p.numel() for p in poly.parameters())}")
-
-    # optimizer includes all parameters of projector + poly
-    params = list(text_proj.parameters()) + list(video_proj.parameters()) + list(poly.parameters())
-    optimizer = torch.optim.AdamW(params, lr=args.lr, weight_decay=1e-4)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=args.lr * 0.1)
-
-    dataset = EmbeddingDataset(text, video)
-    loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
-
-    Path(args.save_dir).mkdir(exist_ok=True, parents=True)
-    best_loss = float('inf')
-
-    mu_weight = getattr(args, "mu_loss_weight", 0.0)
-    n_samples = getattr(args, 'n_samples', 0)
-    init_from = getattr(args, 'init_poly', None)
-    print("\nEnd-to-end training (poly coefficients learnable, NO teacher/fit_poly)")
-    print(f"  poly_degree: {poly.degree}")
-    print(f"  init_poly: {init_from if init_from else 'heuristic initialization'}")
-    print(f"  n_samples: {n_samples} ({'Monte Carlo sampling' if n_samples > 0 else 'deterministic training'})")
-    print(f"  temperature: {args.temperature}")
-    print(f"  mu_loss_weight: {mu_weight} (training only, CIM inference does not use mu)")
-    print(f"  var_reg: {args.var_reg_type} (w={args.var_reg_weight})")
-    print(f"  epochs={args.epochs}, batch={args.batch_size}, lr={args.lr}\n")
-
-    for epoch in range(args.epochs):
-        text_proj.train(); video_proj.train(); poly.train()
-        total = 0.0
-
-        pbar = tqdm(loader, desc=f"Epoch {epoch+1}/{args.epochs}")
-        for tb, vb in pbar:
-            tb = F.normalize(tb.to(device), dim=-1)
-            vb = F.normalize(vb.to(device), dim=-1)
-
-            optimizer.zero_grad()
-            t_mu, t_lv = text_proj(tb)
-            v_mu, v_lv = video_proj(vb)
-
-            # poly loss (poly coefficients also participate in gradients)
-            cont = pcme_loss_eq4_poly(t_mu, t_lv, v_mu, v_lv, poly, temperature=args.temperature)
-
-            # [Training only] mu contrastive loss
-            if mu_weight > 0:
-                loss_mu = mu_contrastive_loss(t_mu, v_mu, temperature=args.temperature)
-                cont = cont + mu_weight * loss_mu
-
-            # variance reg
-            if args.var_reg_type == 'kl':
-                reg = kl_divergence_loss(t_mu, t_lv) + kl_divergence_loss(v_mu, v_lv)
-            elif args.var_reg_type == 'upper_bound':
-                reg = variance_upper_bound_loss(t_lv, args.max_var) + variance_upper_bound_loss(v_lv, args.max_var)
-            else:
-                reg = 0.0
-
-            loss = cont + (args.var_reg_weight * reg if not isinstance(reg, float) else 0.0)
-            loss.backward()
-            optimizer.step()
-
-            total += loss.item()
-            pbar.set_postfix(loss=f"{loss.item():.4f}")
-
-        scheduler.step()
-        avg = total / len(loader)
-        print(f"Epoch {epoch+1}/{args.epochs} loss={avg:.6f}")
-
-        # variance check
-        if args.variance_check_every > 0 and (epoch + 1) % args.variance_check_every == 0:
-            text_proj.eval(); video_proj.eval()
-            with torch.no_grad():
-                tb_all = F.normalize(text[:500].to(device), dim=-1)
-                vb_all = F.normalize(video[:500].to(device), dim=-1)
-                _, t_lv_all = text_proj(tb_all)
-                _, v_lv_all = video_proj(vb_all)
-                t_var = torch.exp(t_lv_all).mean().item()
-                v_var = torch.exp(v_lv_all).mean().item()
-                print(f"  [variance check] text={t_var:.4f}, video={v_var:.4f}")
-
-        # save best
-        if avg < best_loss:
-            best_loss = avg
-            # Convert learnable poly to dataclass when saving
-            poly_surrogate = poly.to_surrogate()
-            torch.save({
-                "text_proj": text_proj.state_dict(),
-                "video_proj": video_proj.state_dict(),
-                "poly": {
-                    "degree": poly_surrogate.degree,
-                    "coeff": poly_surrogate.coeff,
-                    "bias": poly_surrogate.bias,
-                    "fit_logit": poly_surrogate.fit_logit,
-                    "coeff_n": int(poly_surrogate.coeff.numel()),
-                }
-            }, Path(args.save_dir) / "best_projectors_eq4_poly.pth")
-            print("  ✓ saved best")
-
-    print("Done. best_loss =", best_loss)
-    print(f"\nSaved ckpt can be used in measure script:")
-    print(f"  --ckpt {args.save_dir}/best_projectors_eq4_poly.pth")
-    print(f"  (poly coefficients are included in ckpt, need to extract from ckpt during measure)")
-
-
-# -----------------------------
 # CLI
 # -----------------------------
 def build_argparser():
@@ -750,29 +570,6 @@ def build_argparser():
     s2.add_argument("--mu_loss_weight", type=float, default=0.0,
                     help="[Training only] mu contrastive loss weight. CIM inference still only computes (ed,vd)→poly, no mu similarity involved. Set 0.5 to improve retrieval.")
 
-    # train_poly_e2e (end-to-end training, poly coefficients learnable)
-    s3 = sub.add_parser("train_poly_e2e", help="End-to-end training of poly coefficients and projector (no need for teacher/fit_poly)")
-    s3.add_argument("--emb_dir", type=str, default="/mnt/pes/ImageBind/msrvtt_train_embeddings",
-                    help="dir containing emb_text.pt and emb_video.pt")
-    s3.add_argument("--save_dir", type=str, required=True)
-    s3.add_argument("--poly_degree", type=int, default=5, help="poly degree (<=6)")
-    s3.add_argument("--init_poly", type=str, default=None,
-                    help="Optional: initialize from existing poly_coeffs.pt (recommended! improves performance). Use heuristic initialization if not set.")
-    s3.add_argument("--n_samples", type=int, default=5,
-                    help="Monte Carlo sampling count (recommend 5, like baseline PCME). Set 0 for deterministic training (not recommended).")
-    s3.add_argument("--epochs", type=int, default=40)
-    s3.add_argument("--batch_size", type=int, default=64)
-    s3.add_argument("--lr", type=float, default=1e-4, help="Learning rate (slightly higher than train_poly because need to learn poly coefficients)")
-    s3.add_argument("--hidden", type=int, default=2048)
-    s3.add_argument("--temperature", type=float, default=0.07)
-
-    s3.add_argument("--var_reg_type", type=str, choices=["none","kl","upper_bound"], default="upper_bound")
-    s3.add_argument("--var_reg_weight", type=float, default=0.05)
-    s3.add_argument("--max_var", type=float, default=0.09)
-    s3.add_argument("--variance_check_every", type=int, default=5, help="0 disables variance check")
-    s3.add_argument("--mu_loss_weight", type=float, default=0.0,
-                    help="[Training only] mu contrastive loss weight. CIM inference still only computes (ed,vd)→poly.")
-
     return ap
 
 
@@ -786,8 +583,6 @@ def main():
         mode_fit_poly(args)
     elif args.mode == "train_poly":
         mode_train_poly(args)
-    elif args.mode == "train_poly_e2e":
-        mode_train_poly_e2e(args)
     else:
         raise ValueError(f"Unknown mode: {args.mode}")
 
