@@ -10,6 +10,7 @@ MSR-VTT split:
 """
 
 import sys
+import argparse
 from pathlib import Path
 import json
 
@@ -118,6 +119,11 @@ def get_train_split():
 
 
 def main():
+    p = argparse.ArgumentParser(description="Generate ImageBind embeddings for MSR-VTT train set")
+    p.add_argument("--output_dir", type=str, default="/mnt/pes/ImageBind/msrvtt_train_embeddings",
+                   help="Directory to write emb_text.pt and emb_video.pt (default: /mnt/pes/ImageBind/msrvtt_train_embeddings)")
+    args = p.parse_args()
+
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Device: {device}")
 
@@ -172,7 +178,7 @@ def main():
     video_emb = F.normalize(video_emb, dim=-1)
 
     # Save
-    output_dir = Path("/mnt/pes/ImageBind/msrvtt_train_embeddings")
+    output_dir = Path(args.output_dir).resolve()
     output_dir.mkdir(exist_ok=True, parents=True)
 
     torch.save(text_emb, output_dir / "emb_text.pt")

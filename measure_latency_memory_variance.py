@@ -162,30 +162,27 @@ class PolySurrogate:
     coeff: torch.Tensor  # [n_feat]
     bias: float
     fit_logit: bool = True
+    include_bias_in_features: bool = True  # True => 15 coeffs for deg4 (sklearn order with leading 1s), False => 14 coeffs
 
-def _poly_num_features_2vars(degree: int) -> int:
-    return (degree + 2) * (degree + 1) // 2 - 1
+def _poly_num_features_2vars(degree: int, include_bias: bool = True) -> int:
+    """include_bias=True => (degree+1)(degree+2)/2; False => one less (no constant term)."""
+    n = (degree + 1) * (degree + 2) // 2
+    return n if include_bias else n - 1
 
-def _poly_features_2vars(ed: torch.Tensor, vd: torch.Tensor, degree: int) -> torch.Tensor:
-    """Match sklearn PolynomialFeatures(include_bias=False) for [ed, vd]. Returns [..., n_feat]."""
-    feats = [ed, vd]
-    if degree >= 2:
-        feats += [ed * ed, ed * vd, vd * vd]
-    if degree >= 3:
-        feats += [ed**3, (ed**2) * vd, ed * (vd**2), vd**3]
-    if degree >= 4:
-        feats += [ed**4, (ed**3) * vd, (ed**2) * (vd**2), ed * (vd**3), vd**4]
-    if degree >= 5:
-        feats += [ed**5, (ed**4) * vd, (ed**3) * (vd**2), (ed**2) * (vd**3), ed * (vd**4), vd**5]
-    if degree >= 6:
-        feats += [ed**6, (ed**5) * vd, (ed**4) * (vd**2), (ed**3) * (vd**3),
-                  (ed**2) * (vd**4), ed * (vd**5), vd**6]
+def _poly_features_2vars(ed: torch.Tensor, vd: torch.Tensor, degree: int, include_bias: bool = True) -> torch.Tensor:
+    """Polynomial features for [ed, vd]. include_bias=True: leading 1s (sklearn order); False: [ed, vd, ed^2, ...]."""
+    feats = [torch.ones_like(ed)] if include_bias else []
+    for total_deg in range(1, degree + 1):
+        for i in range(total_deg, -1, -1):
+            j = total_deg - i
+            feats.append((ed ** i) * (vd ** j))
     if degree > 6:
         raise ValueError("poly degree > 6 not supported in this evaluator")
     return torch.stack(feats, dim=-1)
 
 def _poly_predict_logits(ed: torch.Tensor, vd: torch.Tensor, poly: PolySurrogate) -> torch.Tensor:
-    X = _poly_features_2vars(ed, vd, poly.degree)
+    inc = getattr(poly, "include_bias_in_features", True)
+    X = _poly_features_2vars(ed, vd, poly.degree, include_bias=inc)
     coeff = poly.coeff.to(X.device, dtype=X.dtype)
     return (X * coeff).sum(dim=-1) + float(poly.bias)
 
@@ -544,14 +541,22 @@ def load_poly(poly_path: str = None, ckpt_path: str = None) -> PolySurrogate:
                 f"Run fit_poly first: python train_poly_projector.py fit_poly --teacher_npz teacher.npz --out poly_coeffs.pt"
             )
         ckpt = torch.load(poly_path, map_location="cpu", weights_only=False)
-        n_feat = _poly_num_features_2vars(int(ckpt["degree"]))
-        if ckpt["coeff"].numel() != n_feat:
-            raise ValueError(f"Poly coeff size mismatch: degree={ckpt['degree']} => n_feat={n_feat}, got {ckpt['coeff'].numel()}")
+        deg = int(ckpt["degree"])
+        n_with = _poly_num_features_2vars(deg, include_bias=True)
+        n_without = _poly_num_features_2vars(deg, include_bias=False)
+        got = ckpt["coeff"].numel()
+        if got == n_with:
+            include_bias_in_features = True
+        elif got == n_without:
+            include_bias_in_features = False
+        else:
+            raise ValueError(f"Poly coeff size mismatch: degree={deg} => expected {n_with} (with bias) or {n_without} (no bias), got {got}")
         return PolySurrogate(
-            degree=int(ckpt["degree"]),
+            degree=deg,
             coeff=ckpt["coeff"].float(),
             bias=float(ckpt["bias"]),
             fit_logit=bool(ckpt.get("fit_logit", True)),
+            include_bias_in_features=include_bias_in_features,
         )
     
     # Mode 2: Extract poly from ckpt (end-to-end training)

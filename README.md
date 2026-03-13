@@ -133,7 +133,7 @@ msrvtt_test_embeddings/
 
 ```bash
 python train_poly_projector.py build_teacher \
-  --emb_dir ./msrvtt_train_embeddings \
+  --emb_dir /mnt/pes/ImageBind/msrvtt_train_embeddings \
   --out teacher.npz \
   --n_pairs 300000 \
   --K 10
@@ -143,21 +143,21 @@ python train_poly_projector.py build_teacher \
 
 ```bash
 python train_poly_projector.py fit_poly \
-  --teacher_npz teacher.npz \
-  --out poly_coeffs_deg6.pt \
-  --degree 6
+  --teacher teacher.npz \
+  --degree 4 \
+  --alpha 1e-3 \
+  --out poly_deg4.pth
 ```
 
 **Step 3: Train Projectors**
 
 ```bash
 python train_poly_projector.py train_poly \
-  --emb_dir ./msrvtt_train_embeddings \
-  --poly_path poly_coeffs_deg6.pt \
-  --save_dir ./poly_model \
+  --emb_dir /mnt/pes/ImageBind/msrvtt_train_embeddings \
+  --poly poly_deg4.pth \
   --epochs 10 \
   --lr 5e-6 \
-  --var_reg_weight 0.001 \
+  --save best_poly_projector.pth \
   --batch_size 64
 ```
 
