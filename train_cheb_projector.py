@@ -66,24 +66,29 @@ class ChebProjector(nn.Module):
 # =========================================================
 
 class GatedChebyshevLayer(nn.Module):
-    def __init__(self, dim, gate_mode="scalar", include_t2=True, include_t5=False,
+    def __init__(self, dim, gate_mode="scalar", include_t2=True, include_t3=True, include_t5=False,
                  init_gates=(1.0, 0.1, 0.1), init_g5=0.1):
         super().__init__()
         self.dim = dim
         self.gate_mode = gate_mode
         self.include_t2 = include_t2
+        self.include_t3 = include_t3
         self.include_t5 = include_t5
 
         if gate_mode == "scalar":
             self.g1 = nn.Parameter(torch.tensor(float(init_gates[0])))
-            self.g2 = nn.Parameter(torch.tensor(float(init_gates[1])))
-            self.g3 = nn.Parameter(torch.tensor(float(init_gates[2])))
+            if include_t2:
+                self.g2 = nn.Parameter(torch.tensor(float(init_gates[1])))
+            if include_t3:
+                self.g3 = nn.Parameter(torch.tensor(float(init_gates[2])))
             if include_t5:
                 self.g5 = nn.Parameter(torch.tensor(float(init_g5)))
         elif gate_mode == "vector":
             self.g1 = nn.Parameter(torch.full((dim,), float(init_gates[0])))
-            self.g2 = nn.Parameter(torch.full((dim,), float(init_gates[1])))
-            self.g3 = nn.Parameter(torch.full((dim,), float(init_gates[2])))
+            if include_t2:
+                self.g2 = nn.Parameter(torch.full((dim,), float(init_gates[1])))
+            if include_t3:
+                self.g3 = nn.Parameter(torch.full((dim,), float(init_gates[2])))
             if include_t5:
                 self.g5 = nn.Parameter(torch.full((dim,), float(init_g5)))
         else:
@@ -93,42 +98,47 @@ class GatedChebyshevLayer(nn.Module):
         T1 = h
         T2 = 2.0 * h * h - 1.0
         T3 = 4.0 * h * h * h - 3.0 * h
-        # T5(x) = 16x^5 - 20x^3 + 5x
         if self.include_t5:
             T5 = 16.0 * h ** 5 - 20.0 * h * h * h + 5.0 * h
 
         if self.gate_mode == "scalar":
-            g1, g2, g3 = self.g1, self.g2, self.g3
+            g1 = self.g1
+            g2 = self.g2 if self.include_t2 else None
+            g3 = self.g3 if self.include_t3 else None
             g5 = self.g5 if self.include_t5 else None
         else:
             g1 = self.g1.view(1, -1)
-            g2 = self.g2.view(1, -1)
-            g3 = self.g3.view(1, -1)
+            g2 = self.g2.view(1, -1) if self.include_t2 else None
+            g3 = self.g3.view(1, -1) if self.include_t3 else None
             g5 = self.g5.view(1, -1) if self.include_t5 else None
 
         parts = [g1 * T1]
         if self.include_t2:
             parts.append(g2 * T2)
-        parts.append(g3 * T3)
+        if self.include_t3:
+            parts.append(g3 * T3)
         if self.include_t5:
             parts.append(g5 * T5)
 
         phi = torch.cat(parts, dim=-1)
-        phi = F.normalize(phi, dim=-1)
         return phi
 
     def gate_summary(self):
         out = {}
         if self.gate_mode == "scalar":
             out["g1"] = float(self.g1.detach().cpu())
-            out["g2"] = float(self.g2.detach().cpu())
-            out["g3"] = float(self.g3.detach().cpu())
+            if self.include_t2:
+                out["g2"] = float(self.g2.detach().cpu())
+            if self.include_t3:
+                out["g3"] = float(self.g3.detach().cpu())
             if self.include_t5:
                 out["g5"] = float(self.g5.detach().cpu())
         else:
             out["g1_mean"] = float(self.g1.detach().mean().cpu())
-            out["g2_mean"] = float(self.g2.detach().mean().cpu())
-            out["g3_mean"] = float(self.g3.detach().mean().cpu())
+            if self.include_t2:
+                out["g2_mean"] = float(self.g2.detach().mean().cpu())
+            if self.include_t3:
+                out["g3_mean"] = float(self.g3.detach().mean().cpu())
             if self.include_t5:
                 out["g5_mean"] = float(self.g5.detach().mean().cpu())
         return out
@@ -248,12 +258,16 @@ def train(args):
             dropout=args.dropout,
         ).to(device)
 
-    # include_t5 => T1+T3+T5 (no T2); otherwise no_t2 => T1+T3 only
+    # t1_only => 仅 T1 (phi=g1*h); include_t5 => T1+T3+T5; no_t2 => T1+T3 only
     include_t5 = getattr(args, "include_t5", False)
+    t1_only = getattr(args, "t1_only", False)
+    include_t2 = not args.no_t2 and not include_t5 and not t1_only
+    include_t3 = not include_t5 and not t1_only
     cheb_layer = GatedChebyshevLayer(
         dim=dim,
         gate_mode=args.gate_mode,
-        include_t2=not args.no_t2 and not include_t5,
+        include_t2=include_t2,
+        include_t3=include_t3,
         include_t5=include_t5,
         init_gates=(args.init_g1, args.init_g2, args.init_g3),
         init_g5=getattr(args, "init_g5", 0.1),
@@ -400,6 +414,8 @@ if __name__ == "__main__":
     parser.add_argument("--gate_mode", choices=["scalar", "vector"], default="scalar")
     parser.add_argument("--no_t2", action="store_true",
                         help="Use only [g1*T1(h), g3*T3(h)] (no T2)")
+    parser.add_argument("--t1_only", action="store_true",
+                        help="Use only T1: phi=g1*h (no Cheb higher-order terms, to ablate)")
     parser.add_argument("--include_t5", action="store_true",
                         help="Add T5: [g1*T1, g3*T3, g5*T5] (implies odd-only, no T2)")
     parser.add_argument("--init_g1", type=float, default=1.0)

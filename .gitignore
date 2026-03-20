@@ -68,6 +68,7 @@ targets.npy
 # Checkpoint and run directories (training / sweep output)
 ckpt_cheb_gated/
 sweep_runs/
+sweep_runs_msvd_multi/
 results/
 sweep_results/
 sweep_deg_optimized/
@@ -83,6 +84,8 @@ pcme_checkpoints_correct/
 experiments/
 outputs/
 checkpoints/
+vatex_experiments/
+pipeline_outputs/
 
 # Large result JSONs (optional: uncomment if you want to track small summaries only)
 # results_*.json
@@ -93,11 +96,17 @@ checkpoints/
 *.log
 logs/
 wandb/
+nohup.out
+*.pid
 
 # Dataset roots (videos, annotations – very large; embeddings live under *_embeddings/)
 ImageBind/
 data/
 datasets/
+dataset_splits_msvd_multi/
+dataset_splits_vatex*/
+dataset_splits/vatex_*/
+dataset_splits/msvd_*.json
 
 # -----------------------------------------------------------------------------
 # Temporary files

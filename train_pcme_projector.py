@@ -136,7 +136,8 @@ def train(args):
     text = torch.load(emb_dir / 'emb_text.pt', weights_only=False)
     video = torch.load(emb_dir / 'emb_video.pt', weights_only=False)
     N = text.shape[0]
-    assert N >= 6000, f"Looks like TEST split (N={N}). Point --emb_dir to msrvtt_train_embeddings."
+    if N < 500:
+        print(f"⚠️  Very small training set detected (N={N}).")
     try:
         audio = torch.load(emb_dir / 'emb_audio.pt', weights_only=False)
         print(f"  Text: {text.shape}, Video: {video.shape}, Audio: {audio.shape}")
