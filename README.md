@@ -17,29 +17,35 @@ Cross-modal-retrieval/
 ├── LICENSE
 ├── .gitignore
 │
-# Setup & Download
-├── download_msrvtt.py              # Download MSR-VTT dataset
-├── setup_msrvtt_complete.sh        # Complete setup (cluster job)
+# MSR-VTT (ImageBind 1k eval + embeddings)
+├── download_msrvtt.py
+├── setup_msrvtt_complete.sh
+├── eval_msrvtt_1kA.py
+├── generate_train_embeddings.py
+├── generate_clip_embeddings.py
+├── run_pcme_benchmark.sh
 │
-# Generate Embeddings
-├── eval_msrvtt_1kA.py              # Generate test embeddings (1000 samples)
-├── generate_train_embeddings.py    # Generate train embeddings (6513 samples)
+# Dataset prep + VATEX full benchmark
+├── prepare_video_text_dataset.py
+├── run_vatex_full_pipeline.py
+├── launch_vatex_full_pipeline.sh
+├── launch_msvd_multi_pipeline.sh
+├── generate_imagebind_embeddings_generic.py
+├── aggregate_vatex_results.py
 │
-# Training & Evaluation
-├── train_poly_projector.py         # Train Poly probabilistic projectors
-├── train_pcme_projector.py         # Train PCME probabilistic projectors
-├── measure_latency_memory_variance.py  # Benchmark performance
-├── run_pcme_benchmark.sh           # End-to-end pipeline (cluster job)
+# Models / training & eval
+├── train_pcme_projector.py
+├── train_cheb_projector.py
+├── train_cheb_projector_v2.py
+├── measure_latency_memory_variance.py
+├── measure_cheb_v2.py
 │
-# Hyperparameter Sweeps
-├── sweep_poly_degree.py            # Sweep polynomial degrees
-├── sweep_epochs.py                 # Sweep training epochs
-├── sweep_hyperparams.py            # Sweep learning rate & variance reg
+# Export (CIM)
+├── export_cheb_for_cim.py
 │
-# Results
 └── results_summary/
-    ├── sweep_summary.csv           # Performance comparison table
-    └── FINAL_COMPARISON_RESULTS.md # Full comparison results
+    ├── FINAL_COMPARISON_RESULTS.md
+    └── sweep_summary.csv
 ```
 
 ---
@@ -313,37 +319,47 @@ python sweep_hyperparams.py \
 
 ## 📊 Expected Results
 
-### **Performance Comparison (MSRVTT-1K Test Set)**
+本仓库的性能（`R@1/5/10`、`MedR`、`MeanR`）会随以下因素变化：
+- 数据集与 split（MSR-VTT / MSVD / VATEX）
+- Chebyshev projector 的阶数（`--cheb_order=3/4/5/6`）
+- loss 权重（`--loss_mode`、`--v2t_weight`、`--t2v_weight`）
+- 以及（PCME）Monte Carlo 采样参数
 
-| Model | Degree | T2V R@1 | V2T R@1 | T2V R@5 | V2T R@5 | CIM Deploy |
-|-------|--------|---------|---------|---------|---------|------------|
-| ImageBind | N/A | 38.70% | 30.30% | 63.60% | 53.30% | ✅ |
-| PCME | N/A | **38.80%** | **37.10%** | 63.30% | **62.00%** | ❌ |
-| **Poly** | **6** | **37.70%** | 33.20% | 61.90% | 59.60% | ✅ |
-
-**Key Findings:**
-- ✅ Poly achieves **97.2% of PCME's T2V performance**
-- ✅ Poly is **CIM-deployable** (no Monte Carlo sampling)
-- ✅ Poly outperforms ImageBind on V2T by **+2.9%**
+建议以你运行得到的结果为准，查看：
+- `${ROOT_DIR}/summary/`（VATEX/MSVD pipeline 汇总）
+- `results_summary/FINAL_COMPARISON_RESULTS.md`（仓库内汇总示例）
 
 ---
 
 ## 🎯 Recommended Configuration
 
-For **CIM deployment**, use **Poly (Degree=6)** with:
+如果你想用于 **CIM 部署/部署端加速**，建议直接使用仓库里的 **Chebyshev (Cheb) projector**（而不是旧的 Poly）。
+
+- 训练：`train_cheb_projector_v2.py`（用 `--cheb_order 3/4/5/6`）
+- 完整 benchmark：`launch_vatex_full_pipeline.sh` / `run_vatex_full_pipeline.py`
+- 选择最优：查看 `${ROOT_DIR}/summary/` 里的汇总表（不同数据/损失权重下最佳超参可能会变化）
+
+---
+
+## VATEX Full Pipeline
+
+推荐直接在服务器上后台运行，脚本会分 stage 执行并写入：
+- marker：`${ROOT_DIR}/state/*.done`
+- 日志：`${ROOT_DIR}/logs/pipeline.log`
+- 汇总表：`${ROOT_DIR}/summary/`
 
 ```bash
-Polynomial Degree: 6
-Learning Rate: 5e-6  ⭐ (Critical!)
-Epochs: 10
-Variance Reg: kl (weight=0.001)
-Batch Size: 64
+# 推荐：使用 /data2 作为根目录
+bash launch_vatex_full_pipeline.sh /data2/vatex_experiments
+
+# 查看进度
+tail -f /data2/vatex_experiments/logs/pipeline.log
+
+# 运行完成后查看汇总
+ls -1 /data2/vatex_experiments/summary
 ```
 
-**Why these parameters?**
-- **LR=5e-6**: Half of default (1e-5), prevents overfitting, +7-8% gain
-- **Epochs=10**: Prevents overfitting (20-30 epochs lead to worse performance)
-- **Degree=6**: Best T2V performance (37.70%)
+你也可以在 `launch_vatex_full_pipeline.sh` 里改 `PCME_EPOCHS` / `CHEB_EPOCHS`。
 
 ---
 

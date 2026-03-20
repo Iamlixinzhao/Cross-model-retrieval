@@ -1,21 +1,31 @@
 # Core Dependencies
 torch>=2.0.0
 torchvision>=0.15.0
+torchaudio>=2.0.0
 numpy>=1.21.0
-scikit-learn>=1.0.0
 tqdm>=4.65.0
 
-# Data Processing
+# Data Processing / analysis
 pandas>=1.3.0
+
+# Video decoding / image I/O (used by ImageBind encoding & evaluation scripts)
+decord>=0.6.0
+pillow>=9.0.0
+einops>=0.7.0
+
+# VATEX / MSVD dataset preparation
+kagglehub>=0.2.0
+datasets>=2.0.0
 
 # Optional: Visualization
 matplotlib>=3.5.0
 seaborn>=0.11.0
 
-# Optional: Better progress bars
+# Optional: Better progress bars / rich logs
 rich>=10.0.0
 
-# Development
+# Development / QA
 pytest>=7.0.0
 black>=22.0.0
 flake8>=4.0.0
+scikit-learn>=1.0.0
