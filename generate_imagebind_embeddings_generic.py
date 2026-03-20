@@ -67,6 +67,17 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     payload, texts, video_paths, video_ids = load_pairs(pairs_json)
+    # Fail fast: eval_msrvtt_1kA.encode_video uses zero vectors for missing/failed videos,
+    # which silently destroys retrieval metrics.
+    missing = [p for p in video_paths if not p.exists()]
+    if missing:
+        n = len(missing)
+        examples = [str(p) for p in missing[:5]]
+        raise FileNotFoundError(
+            f"Missing {n}/{len(video_paths)} video files. "
+            f"Restore clips or re-run prepare_video_text_dataset.py with valid --corpus_dir/--videos_dir. "
+            f"Examples: {examples}"
+        )
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
     print(f"Pairs: {len(texts)}")
