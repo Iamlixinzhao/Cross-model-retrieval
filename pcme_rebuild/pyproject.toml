@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pcme-rebuild"
+version = "0.1.0"
+description = "Auditable probabilistic retrieval and frozen-teacher PolySim experiments"
+requires-python = ">=3.10"
+dependencies = ["torch>=2.5,<3", "numpy>=1.24,<3", "Pillow>=10"]
+
+[project.optional-dependencies]
+clip = ["transformers>=4.45,<5"]
+test = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
